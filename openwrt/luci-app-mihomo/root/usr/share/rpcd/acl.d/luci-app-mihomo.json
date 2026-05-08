@@ -1,0 +1,15 @@
+{
+  "luci-app-mihomo": {
+    "description": "Grant access to Mihomo LuCI shell entry",
+    "read": {
+      "ubus": {
+        "session": [
+          "access"
+        ]
+      },
+      "uci": [
+        "mihomo"
+      ]
+    }
+  }
+}

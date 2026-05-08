@@ -1,0 +1,14 @@
+# Minimal mihomo config — overwritten by user's real subscription / rules.
+# Top-level external-controller / external-ui / secret are stripped at runtime
+# and re-injected from UCI (/etc/config/mihomo) by /etc/init.d/mihomo.
+mixed-port: 7890
+allow-lan: true
+mode: rule
+log-level: info
+external-controller: '0.0.0.0:9090'
+external-ui: 'ui'
+secret: ''
+proxies: []
+proxy-groups: []
+rules:
+  - 'MATCH,DIRECT'

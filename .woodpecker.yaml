@@ -1,0 +1,63 @@
+when:
+  branch: master
+  event: push
+
+steps:
+  - name: build-ipk
+    image: alpine:3.20
+    commands:
+      - apk add --no-cache tar gzip bash git python3
+      - SHORT_SHA=$(echo $CI_COMMIT_SHA | cut -c1-8)
+      - bash scripts/build-openwrt-ipk.sh --version "v0.0.0-$SHORT_SHA"
+      - ls -lh dist/ipk/*/artifacts/*.ipk
+
+  - name: deploy
+    image: alpine
+    commands:
+      - apk add --no-cache openssh-client
+      - mkdir -p ~/.ssh
+      - echo "$CI_SSH_KEY" > ~/.ssh/deploy_key
+      - chmod 600 ~/.ssh/deploy_key
+      - ssh-keyscan -H "$OPENWRT_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+      - SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
+      - DATA_DIR="${MIHOMO_DATA_DIR:-/mnt/ext/app/mihomo}"
+      - scp $SSH_OPTS dist/ipk/*/artifacts/*.ipk "$OPENWRT_USER@$OPENWRT_HOST:/tmp/"
+      - |
+        ssh $SSH_OPTS "$OPENWRT_USER@$OPENWRT_HOST" "
+          set -eu
+          opkg install /tmp/mihomo_*.ipk
+          opkg install /tmp/luci-app-mihomo_*.ipk
+          uci set mihomo.main.data_dir='$DATA_DIR'
+          uci commit mihomo
+          /etc/init.d/mihomo restart
+          sleep 2
+          pidof mihomo > /dev/null && echo 'mihomo running' || (echo 'mihomo failed to start' && exit 1)
+          rm -f /tmp/*.ipk
+        "
+      - rm -f ~/.ssh/deploy_key
+    environment:
+      CI_SSH_KEY:
+        from_secret: ci_ssh_key
+      OPENWRT_HOST:
+        from_secret: openwrt_host
+      OPENWRT_USER:
+        from_secret: openwrt_user
+      MIHOMO_DATA_DIR: /mnt/ext/app/mihomo
+
+  - name: notify-success
+    image: docker.test4x.com/xgfan/plugin-bark
+    failure: ignore
+    settings:
+      token:
+        from_secret: bark_token
+      status: success
+
+  - name: notify-failure
+    image: docker.test4x.com/xgfan/plugin-bark
+    failure: ignore
+    settings:
+      token:
+        from_secret: bark_token
+      status: failure
+    when:
+      - status: [failure]

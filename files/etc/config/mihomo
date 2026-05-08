@@ -1,0 +1,10 @@
+config mihomo 'main'
+	option enabled '1'
+	option data_dir '/etc/mihomo'
+	option controller_port '9090'
+	option ui_path 'ui'
+	option secret ''
+	# Binary auto-install (used by /usr/sbin/mihomo-install-binary)
+	option binary_version 'latest'
+	option binary_arch ''
+	option binary_variant 'compatible'

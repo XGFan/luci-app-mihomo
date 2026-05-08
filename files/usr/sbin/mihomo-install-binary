@@ -1,0 +1,161 @@
+#!/bin/sh
+#
+# mihomo-install-binary — download/update mihomo binary into configured data_dir
+#
+# Without args, uses UCI option binary_version ('latest' if unset).
+# With arg (e.g. v1.19.24), pins that version.
+#
+# UCI options (/etc/config/mihomo, section 'main'):
+#   data_dir          target directory                        (default /etc/mihomo)
+#   binary_arch       release arch override                   (default empty = auto)
+#                       valid: amd64, amd64-compatible, arm64, armv7, armv6,
+#                              mips-softfloat, mipsle-softfloat, mips64, mips64le, ...
+#   binary_variant    only used when binary_arch is empty AND uname=x86_64
+#                       'compatible' (default, V1/V2 CPUs)
+#                       'v3'         (V3 CPUs)
+#   binary_version    release tag                             (default 'latest')
+#
+set -eu
+
+UPSTREAM_REPO='MetaCubeX/mihomo'
+RAW_VERSION_ARG="${1:-}"
+
+usage() {
+	cat <<EOF
+Usage: $(basename "$0") [VERSION] [-h|--help]
+
+Download mihomo binary from https://github.com/${UPSTREAM_REPO}/releases
+into the UCI-configured data_dir.
+
+  VERSION   release tag (e.g. v1.19.24). Overrides UCI binary_version.
+            Use 'latest' to query GitHub for the most recent release.
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") v1.19.24
+  $(basename "$0") latest
+EOF
+}
+
+case "${RAW_VERSION_ARG}" in
+	-h|--help) usage; exit 0 ;;
+esac
+
+if ! command -v wget >/dev/null 2>&1; then
+	echo "ERROR: wget is required" >&2
+	exit 3
+fi
+if ! command -v gunzip >/dev/null 2>&1; then
+	echo "ERROR: gunzip is required" >&2
+	exit 3
+fi
+
+. /lib/functions.sh
+config_load mihomo
+
+DATA_DIR=
+BINARY_ARCH=
+BINARY_VARIANT=
+BINARY_VERSION=
+config_get DATA_DIR        main data_dir       '/etc/mihomo'
+config_get BINARY_ARCH     main binary_arch    ''
+config_get BINARY_VARIANT  main binary_variant 'compatible'
+config_get BINARY_VERSION  main binary_version 'latest'
+
+if [ -n "${RAW_VERSION_ARG}" ]; then
+	BINARY_VERSION="${RAW_VERSION_ARG}"
+fi
+
+detect_arch() {
+	local m
+	m="$(uname -m)"
+	case "${m}" in
+		x86_64)
+			case "${BINARY_VARIANT}" in
+				v3)          echo 'amd64' ;;
+				compatible|*) echo 'amd64-compatible' ;;
+			esac
+			;;
+		aarch64) echo 'arm64' ;;
+		armv7l)  echo 'armv7' ;;
+		armv6l)  echo 'armv6' ;;
+		mips)    echo 'mips-softfloat' ;;
+		mipsel)  echo 'mipsle-softfloat' ;;
+		mips64)  echo 'mips64' ;;
+		mips64el) echo 'mips64le' ;;
+		i386|i686) echo '386' ;;
+		*)
+			echo "ERROR: cannot map machine arch '${m}' to mihomo release arch" >&2
+			echo "Set binary_arch in /etc/config/mihomo manually." >&2
+			exit 2
+			;;
+	esac
+}
+
+resolve_version() {
+	local v="$1"
+	if [ "${v}" != 'latest' ]; then
+		printf '%s\n' "${v}"
+		return 0
+	fi
+	local api_url tag
+	api_url="https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest"
+	tag="$(wget -qO- "${api_url}" 2>/dev/null \
+		| grep -m1 '"tag_name"' \
+		| sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+	if [ -z "${tag}" ]; then
+		echo "ERROR: failed to resolve 'latest' tag from ${api_url}" >&2
+		exit 4
+	fi
+	printf '%s\n' "${tag}"
+}
+
+ARCH="${BINARY_ARCH}"
+if [ -z "${ARCH}" ]; then
+	ARCH="$(detect_arch)"
+fi
+VERSION="$(resolve_version "${BINARY_VERSION}")"
+
+FNAME="mihomo-linux-${ARCH}-${VERSION}.gz"
+URL="https://github.com/${UPSTREAM_REPO}/releases/download/${VERSION}/${FNAME}"
+
+mkdir -p "${DATA_DIR}"
+
+TMP_GZ="$(mktemp "${DATA_DIR}/.mihomo.XXXXXX.gz")"
+TMP_BIN="$(mktemp "${DATA_DIR}/.mihomo.XXXXXX.bin")"
+
+cleanup() {
+	rm -f "${TMP_GZ}" "${TMP_BIN}"
+}
+trap cleanup EXIT INT TERM
+
+echo "Downloading ${URL}"
+if ! wget -q -O "${TMP_GZ}" "${URL}"; then
+	echo "ERROR: download failed" >&2
+	exit 5
+fi
+
+if [ ! -s "${TMP_GZ}" ]; then
+	echo "ERROR: downloaded archive is empty" >&2
+	exit 5
+fi
+
+echo "Decompressing..."
+if ! gunzip -c "${TMP_GZ}" > "${TMP_BIN}"; then
+	echo "ERROR: gunzip failed (corrupt download or wrong arch?)" >&2
+	exit 6
+fi
+
+if [ ! -s "${TMP_BIN}" ]; then
+	echo "ERROR: decompressed binary is empty" >&2
+	exit 7
+fi
+
+chmod 0755 "${TMP_BIN}"
+
+mv "${TMP_BIN}" "${DATA_DIR}/mihomo"
+TMP_BIN=""
+rm -f "${TMP_GZ}"
+TMP_GZ=""
+
+echo "Installed ${DATA_DIR}/mihomo (version=${VERSION}, arch=${ARCH})"

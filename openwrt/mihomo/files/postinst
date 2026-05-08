@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -eu
+
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+
+initd="/etc/init.d/mihomo"
+
+if [ -x "${initd}" ]; then
+  "${initd}" enable >/dev/null 2>&1 || true
+  "${initd}" restart >/dev/null 2>&1 || true
+fi
+
+exit 0

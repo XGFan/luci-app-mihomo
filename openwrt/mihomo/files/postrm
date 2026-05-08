@@ -1,0 +1,19 @@
+#!/bin/sh
+
+set -eu
+
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+
+action="${1:-}"
+
+case "${action}" in
+  remove|purge|deconfigure)
+    rm -f /var/run/mihomo.pid /var/run/mihomo.yaml
+
+    if [ ! -e /etc/mihomo/config.yaml ]; then
+      rmdir /etc/mihomo >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
+
+exit 0
