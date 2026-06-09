@@ -8,7 +8,7 @@ OpenWrt 上 [mihomo](https://github.com/MetaCubeX/mihomo)（Clash.Meta）的 LuC
 
 - **UCI 化的 service**：通过 `/etc/config/mihomo` 控制启停、端口、data_dir、secret
 - **二进制按需自动下载**：首次启动时若 `${data_dir}/mihomo` 不存在，自动从 [MetaCubeX/mihomo releases](https://github.com/MetaCubeX/mihomo/releases) 拉对应架构的二进制；**已存在则不动**
-- **运行时配置注入**：service 启动时从 UCI 读 `external-controller` / `external-ui` / `secret`，注入到 `/var/run/mihomo.yaml`，用户的 `${data_dir}/config.yaml` 不被改写
+- **UCI 覆盖注入**：service 启动时从 UCI 读 `external-controller` / `external-ui` / `secret`，以 mihomo 覆盖参数（`-ext-ctl` / `-ext-ui` / `-secret`）注入，mihomo 直接读用户的 `${data_dir}/config.yaml`，文件本身不被改写；dashboard 的「重载配置 / 重启内核」因此能直接生效
 - **LuCI iframe**：`Services / Mihomo` 菜单嵌入 mihomo 自带 dashboard，URL 由 UCI 端口和路径动态拼接
 - **conffile 升级保留**：`opkg upgrade` 时用户对 `/etc/config/mihomo` 与 `/etc/mihomo/config.yaml` 的改动保留
 - **Woodpecker CI**：`master` 分支 push 自动构建 + 部署到目标路由器（参见 `.woodpecker.yaml`）
@@ -112,21 +112,15 @@ uci commit mihomo && /etc/init.d/mihomo restart
                           │   reads enabled, data_dir,
                           │   controller_port, ui_path, secret
                           ▼
-                  generate_runtime_config:
-                    ┌─ printf top 3 lines from UCI
-                    │  external-controller: "0.0.0.0:9090"
-                    │  external-ui: "ui"
-                    │  secret: "..."
-                    └─ sed -E 删除 ${data_dir}/config.yaml 中
-                       的同名顶层字段，append 剩余内容
-                          ▼
-                /var/run/mihomo.yaml
-                          ▼
-        procd_open_instance:
-          ${data_dir}/mihomo -f /var/run/mihomo.yaml -d ${data_dir}
+        procd_open_instance: mihomo 直接读 config.yaml，
+        UCI 三项以覆盖参数注入（优先级高于 yaml 同名字段）
+          ${data_dir}/mihomo -d ${data_dir} -f ${data_dir}/config.yaml \
+            -ext-ctl 0.0.0.0:9090 -ext-ui ui -secret "..."
 ```
 
-`procd_set_param file /etc/config/mihomo ${data_dir}/config.yaml` 让 procd 监听这两个文件，外部 `service mihomo reload` 会重新生成 `/var/run/mihomo.yaml` 并重启实例。
+mihomo 以 `-f ${data_dir}/config.yaml` 启动，所以 dashboard 的「重载配置」(`PUT /configs`) / 「重启内核」(`POST /restart`) 重新读取的就是这个用户文件，编辑后无需 `init.d restart` 即可生效。`procd_set_param file /etc/config/mihomo` **只监听 UCI 文件**——改端口/路径/secret 等 wrapper 设置会重启实例以重新应用覆盖参数；`config.yaml` **刻意不监听**，避免一次坏改动（或订阅更新）把正在运行的 mihomo 自动重启进「起不来」的状态，改动只在你主动 reload/restart 时才生效。
+
+> ⚠️ 不要再让 mihomo 以「生成的临时配置」(如旧版的 `/var/run/mihomo.yaml`) 启动：dashboard 的 reload/restart 只读 mihomo 自己的 `-f` 文件，一旦那是快照，UI 重载就会加载过期配置，只有 `/etc/init.d/mihomo restart` 才生效。
 
 ## 仓库结构
 
@@ -166,7 +160,9 @@ uci commit mihomo && /etc/init.d/mihomo restart
 - **`/etc/init.d/mihomo restart` 后服务起不来**
   - `logread | grep mihomo` 看 procd 日志
   - 校验 `${data_dir}` 下是否存在可执行 `mihomo` + `config.yaml`
-  - 若曾手动改过 `/var/run/mihomo.yaml`，那是运行时生成文件，被 init.d 覆盖
+- **dashboard「重载配置 / 重启内核」不生效，只有 `init.d restart` 才加载新配置**
+  - 确认 mihomo 是以 `-f ${data_dir}/config.yaml` 启动（`ps w | grep mihomo`），而非某个生成的临时文件
+  - 老版本以 `/var/run/mihomo.yaml` 启动会有此问题，升级到本版本即可
 - **iframe 加载失败**
   - 浏览器 devtools 看是否被 `Mixed Content`（http→https）拦
   - 直接在新标签打开 `http://<router>:9090/ui/` 验证 dashboard 本身能开

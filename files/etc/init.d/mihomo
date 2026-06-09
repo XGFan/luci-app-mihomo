@@ -6,7 +6,6 @@ USE_PROCD=1
 EXTRA_COMMANDS="update"
 EXTRA_HELP="	update [VERSION]   Download/update the mihomo binary into data_dir"
 
-RUNTIME_CONFIG=/var/run/mihomo.yaml
 INSTALL_BINARY=/usr/sbin/mihomo-install-binary
 
 update() {
@@ -15,26 +14,6 @@ update() {
 		return 1
 	fi
 	"${INSTALL_BINARY}" "$@"
-}
-
-generate_runtime_config() {
-	local data_dir="$1"
-	local controller_port="$2"
-	local ui_path="$3"
-	local secret="$4"
-	local user_config="${data_dir}/config.yaml"
-
-	mkdir -p /var/run
-
-	# UCI fields override yaml top-level external-controller / external-ui / secret
-	{
-		printf 'external-controller: "0.0.0.0:%s"\n' "${controller_port}"
-		printf 'external-ui: "%s"\n' "${ui_path}"
-		printf 'secret: "%s"\n' "${secret}"
-		if [ -f "${user_config}" ]; then
-			sed -E '/^external-controller:[[:space:]]/d; /^external-ui:[[:space:]]/d; /^secret:[[:space:]]/d' "${user_config}"
-		fi
-	} > "${RUNTIME_CONFIG}"
 }
 
 ensure_binary() {
@@ -81,17 +60,28 @@ start_service() {
 		return 1
 	fi
 
-	generate_runtime_config "${data_dir}" "${controller_port}" "${ui_path}" "${secret}"
-
 	procd_open_instance mihomo
-	procd_set_param command "${data_dir}/mihomo" -f "${RUNTIME_CONFIG}" -d "${data_dir}"
+	# Run mihomo directly against the user's config.yaml so the dashboard's
+	# "reload config" / "restart core" actions (which re-read mihomo's own -f
+	# file) pick up edits. UCI controller/UI/secret are injected as override
+	# flags (-ext-ctl/-ext-ui/-secret); they take precedence over the same keys
+	# in config.yaml and persist across hot reloads. No ephemeral copy is made,
+	# so the user's config.yaml is still never modified.
+	procd_set_param command "${data_dir}/mihomo" -d "${data_dir}" -f "${data_dir}/config.yaml" \
+		-ext-ctl "0.0.0.0:${controller_port}" -ext-ui "${ui_path}" -secret "${secret}"
 	procd_set_param respawn "${respawn_threshold:-3600}" "${respawn_timeout:-5}" "${respawn_retry:-5}"
 	procd_set_param limits core="unlimited"
 	procd_set_param stdout 0
 	procd_set_param stderr 0
 	procd_set_param user root
 	procd_set_param pidfile /var/run/mihomo.pid
-	procd_set_param file /etc/config/mihomo "${data_dir}/config.yaml"
+	# Watch ONLY the UCI file: changing wrapper settings (port/path/secret/…)
+	# must restart mihomo to re-apply the override flags. The user's config.yaml
+	# is intentionally NOT watched — a bad edit or subscription update must not
+	# auto-restart a running mihomo into a failed-to-start state. config.yaml
+	# changes apply on the next explicit dashboard "reload config" / "restart
+	# core" (or `/etc/init.d/mihomo restart`), when the user is present to react.
+	procd_set_param file /etc/config/mihomo
 	procd_close_instance
 }
 
