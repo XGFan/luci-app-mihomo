@@ -21,12 +21,18 @@ steps:
       - ssh-keyscan -H "$OPENWRT_HOST" >> ~/.ssh/known_hosts 2>/dev/null
       - SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new"
       - DATA_DIR="${MIHOMO_DATA_DIR:-/mnt/ext/app/mihomo}"
+      - SHORT_SHA=$(echo $CI_COMMIT_SHA | cut -c1-8)
+      # 版本号是 0.0.0-<sha8>，sha 不单调：新提交的 sha 字典序更小时 opkg 当成降级，打印
+      # Not downgrading 后照样返回 0（CI 绿但没部署）。所以 --force-downgrade 总是装这次构建的包，
+      # 再断言已安装版本就是本次 sha。
       - scp $SSH_OPTS dist/ipk/*/artifacts/*.ipk "$OPENWRT_USER@$OPENWRT_HOST:/tmp/"
       - |
         ssh $SSH_OPTS "$OPENWRT_USER@$OPENWRT_HOST" "
           set -eu
-          opkg install /tmp/mihomo_*.ipk
-          opkg install /tmp/luci-app-mihomo_*.ipk
+          opkg install --force-downgrade /tmp/mihomo_*.ipk
+          opkg install --force-downgrade /tmp/luci-app-mihomo_*.ipk
+          opkg list-installed | grep -q '^mihomo - 0.0.0-$SHORT_SHA' || (echo 'mihomo ipk not installed' && exit 1)
+          opkg list-installed | grep -q '^luci-app-mihomo - 0.0.0-$SHORT_SHA' || (echo 'luci-app-mihomo ipk not installed' && exit 1)
           uci set mihomo.main.data_dir='$DATA_DIR'
           uci commit mihomo
           /etc/init.d/mihomo restart
