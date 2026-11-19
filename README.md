@@ -158,7 +158,7 @@ mihomo 以 `-f ${data_dir}/config.yaml` 启动，所以 dashboard 的「重载�
 ## 故障排查
 
 - **`/etc/init.d/mihomo restart` 后服务起不来**
-  - `logread | grep mihomo` 看 procd 日志
+  - `logread | grep mihomo` 看日志（mihomo 自身的 stdout/stderr 也经 procd 进 syslog，ident 为 `mihomo`）
   - 校验 `${data_dir}` 下是否存在可执行 `mihomo` + `config.yaml`
 - **dashboard「重载配置 / 重启内核」不生效，只有 `init.d restart` 才加载新配置**
   - 确认 mihomo 是以 `-f ${data_dir}/config.yaml` 启动（`ps w | grep mihomo`），而非某个生成的临时文件
