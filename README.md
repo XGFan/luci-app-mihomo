@@ -58,6 +58,7 @@ config mihomo 'main'
     option controller_port '9090'
     option ui_path 'ui'
     option secret ''
+    option log_to_syslog '1'
     option binary_version 'latest'
     option binary_arch ''
     option binary_variant 'compatible'
@@ -70,6 +71,7 @@ config mihomo 'main'
 | `controller_port` | `9090` | mihomo external-controller 端口 + LuCI iframe 目标端口 |
 | `ui_path` | `ui` | external-ui 名称 + LuCI iframe URL 路径段 |
 | `secret` | `''` | Clash API secret |
+| `log_to_syslog` | `1` | `1` 把 mihomo 自身的 stdout/stderr 送进 syslog（`logread`、远程 syslog 都能看到）；`0` 丢弃。日志量由 `config.yaml` 的 `log-level` 决定；改它需要重启 mihomo 才生效 |
 | `binary_version` | `latest` | mihomo release tag。`latest` 走 GitHub API；或写固定 `v1.19.24` |
 | `binary_arch` | `''` | release 架构覆盖；空则按 `uname -m` 自动检测 |
 | `binary_variant` | `compatible` | 仅 x86_64 + auto-arch 时使用：`compatible`（V1/V2 CPU）或 `v3`（V3 CPU） |

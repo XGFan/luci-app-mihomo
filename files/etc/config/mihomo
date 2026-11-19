@@ -4,6 +4,8 @@ config mihomo 'main'
 	option controller_port '9090'
 	option ui_path 'ui'
 	option secret ''
+	# 1 = forward mihomo's stdout/stderr to syslog (logread); 0 = discard
+	option log_to_syslog '1'
 	# Binary auto-install (used by /usr/sbin/mihomo-install-binary)
 	option binary_version 'latest'
 	option binary_arch ''

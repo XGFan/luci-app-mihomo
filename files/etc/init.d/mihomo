@@ -41,12 +41,13 @@ start_service() {
 	. /lib/functions.sh
 	config_load 'mihomo'
 
-	local enabled data_dir controller_port ui_path secret
+	local enabled data_dir controller_port ui_path secret log_to_syslog
 	config_get_bool enabled 'main' 'enabled' 1
 	config_get data_dir 'main' 'data_dir' '/etc/mihomo'
 	config_get controller_port 'main' 'controller_port' '9090'
 	config_get ui_path 'main' 'ui_path' 'ui'
 	config_get secret 'main' 'secret' ''
+	config_get_bool log_to_syslog 'main' 'log_to_syslog' 1
 
 	[ "${enabled}" = '1' ] || return 1
 
@@ -71,10 +72,11 @@ start_service() {
 		-ext-ctl "0.0.0.0:${controller_port}" -ext-ui "${ui_path}" -secret "${secret}"
 	procd_set_param respawn "${respawn_threshold:-3600}" "${respawn_timeout:-5}" "${respawn_retry:-5}"
 	procd_set_param limits core="unlimited"
-	# Forward mihomo's own log output to syslog (ident "mihomo"): logread and any
-	# remote syslog forwarding then see it. Volume follows config.yaml log-level.
-	procd_set_param stdout 1
-	procd_set_param stderr 1
+	# UCI log_to_syslog (default 1): forward mihomo's own stdout/stderr to syslog
+	# (ident "mihomo") so logread and any remote syslog forwarding see it; 0 discards
+	# it. Volume follows config.yaml log-level.
+	procd_set_param stdout "${log_to_syslog}"
+	procd_set_param stderr "${log_to_syslog}"
 	procd_set_param user root
 	procd_set_param pidfile /var/run/mihomo.pid
 	# Watch ONLY the UCI file: changing wrapper settings (port/path/secret/…)
